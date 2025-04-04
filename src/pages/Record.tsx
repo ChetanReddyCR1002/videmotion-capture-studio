@@ -19,7 +19,7 @@ const Record = () => {
   const [modelLoaded, setModelLoaded] = useState(false);
   const [loadingModel, setLoadingModel] = useState(false);
   
-  // Emotion analysis data
+  // Emotion analysis data with proper typing
   const [emotions, setEmotions] = useState({ 
     happy: 0.1, 
     neutral: 0.7, 
@@ -113,7 +113,7 @@ const Record = () => {
         const result = await detectEmotion(videoRef.current);
         
         if (result) {
-          // Update emotion state with detected values
+          // Update emotion state with detected values - using the properly formatted emotions
           setEmotions(result.allEmotions);
           setDetectedEmotion(result.emotion);
           setConfidence(result.confidence);

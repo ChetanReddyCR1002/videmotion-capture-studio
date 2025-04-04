@@ -1,8 +1,9 @@
 
 import * as tf from '@tensorflow/tfjs';
 
-// Labels for the emotions our model can detect
+// Labels for the emotions our model can detect - mapping to what the UI expects
 const EMOTION_LABELS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral'];
+const UI_EMOTION_KEYS = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprised', 'neutral'];
 
 let model: tf.LayersModel | null = null;
 
@@ -53,13 +54,68 @@ const preprocessImage = (imageData: ImageData): tf.Tensor => {
 };
 
 /**
+ * Maps the model's output to the UI's expected emotion format
+ * @param emotionScores - The raw scores from the model
+ * @returns An object with the standard emotion keys expected by the UI
+ */
+const mapEmotionsToUIFormat = (emotionScores: Float32Array): {
+  happy: number;
+  neutral: number;
+  surprised: number;
+  sad: number;
+  angry: number;
+  disgust: number;
+  fear: number;
+} => {
+  const emotionMap: Record<string, number> = {};
+  
+  // Initialize with zeros
+  const result = {
+    happy: 0,
+    neutral: 0,
+    surprised: 0,
+    sad: 0,
+    angry: 0,
+    disgust: 0,
+    fear: 0
+  };
+  
+  // Map the model output to corresponding UI keys
+  EMOTION_LABELS.forEach((label, index) => {
+    const uiKey = UI_EMOTION_KEYS[index];
+    emotionMap[uiKey] = emotionScores[index];
+  });
+  
+  // Assign values to the result object
+  Object.keys(result).forEach(key => {
+    if (emotionMap[key] !== undefined) {
+      result[key as keyof typeof result] = emotionMap[key];
+    }
+  });
+  
+  return result;
+};
+
+/**
  * Detects emotion from a video element
  * @param videoElement - The video element containing the face
  * @returns Object with detected emotions and their confidence scores
  */
 export const detectEmotion = async (
   videoElement: HTMLVideoElement
-): Promise<{ emotion: string; confidence: number; allEmotions: Record<string, number> } | null> => {
+): Promise<{ 
+  emotion: string; 
+  confidence: number; 
+  allEmotions: {
+    happy: number;
+    neutral: number;
+    surprised: number;
+    sad: number;
+    angry: number;
+    disgust: number;
+    fear: number;
+  };
+} | null> => {
   if (!model) {
     console.warn('Emotion detection model not loaded');
     return null;
@@ -95,20 +151,17 @@ export const detectEmotion = async (
     // Get the results
     const emotionScores = await predictions.data();
     
-    // Convert to array of label-score pairs
-    const emotionsWithScores = EMOTION_LABELS.map((label, index) => ({
-      emotion: label.toLowerCase(),
-      score: emotionScores[index]
+    // Map emotions to UI format
+    const formattedEmotions = mapEmotionsToUIFormat(emotionScores as Float32Array);
+    
+    // Convert to array of label-score pairs for finding the top emotion
+    const emotionsWithScores = Object.entries(formattedEmotions).map(([emotion, score]) => ({
+      emotion,
+      score
     }));
     
     // Sort by score (highest first)
     emotionsWithScores.sort((a, b) => b.score - a.score);
-    
-    // Create an object with all emotions and their scores
-    const allEmotions: Record<string, number> = {};
-    emotionsWithScores.forEach(item => {
-      allEmotions[item.emotion.toLowerCase()] = parseFloat(item.score.toFixed(4)); // Round to 4 decimal places
-    });
     
     // Clean up tensors
     tensor.dispose();
@@ -118,7 +171,7 @@ export const detectEmotion = async (
     return {
       emotion: emotionsWithScores[0].emotion,
       confidence: emotionsWithScores[0].score,
-      allEmotions
+      allEmotions: formattedEmotions
     };
   } catch (error) {
     console.error('Error during emotion detection:', error);
