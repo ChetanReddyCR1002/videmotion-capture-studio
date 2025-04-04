@@ -11,8 +11,14 @@ let model: tf.LayersModel | null = null;
  */
 export const loadEmotionDetectionModel = async (): Promise<boolean> => {
   try {
-    // Convert and load the h5 model
+    // Load the model
     model = await tf.loadLayersModel('/emotion_detector.json');
+    
+    // Warm up the model with a dummy tensor to ensure it's ready
+    const dummyTensor = tf.zeros([1, 48, 48, 1]);
+    model.predict(dummyTensor);
+    dummyTensor.dispose();
+    
     console.log('Emotion detection model loaded successfully');
     return true;
   } catch (error) {
@@ -27,30 +33,23 @@ export const loadEmotionDetectionModel = async (): Promise<boolean> => {
  * @returns A tensor ready for model prediction
  */
 const preprocessImage = (imageData: ImageData): tf.Tensor => {
-  // Convert ImageData to tensor
-  const tensor = tf.browser.fromPixels(imageData);
-  
-  // Resize to model input size (48x48 is common for emotion models)
-  const resized = tf.image.resizeBilinear(tensor, [48, 48]);
-  
-  // Convert to grayscale (if model expects grayscale input)
-  const grayscale = tf.tidy(() => {
-    // Calculate grayscale using standard formula
-    return resized.mean(2).expandDims(2);
+  return tf.tidy(() => {
+    // Convert ImageData to tensor
+    const tensor = tf.browser.fromPixels(imageData);
+    
+    // Resize to model input size
+    const resized = tf.image.resizeBilinear(tensor, [48, 48]);
+    
+    // Convert to grayscale (for emotion recognition)
+    const grayscale = resized.mean(2).expandDims(2);
+    
+    // Enhance contrast
+    const meanVal = grayscale.mean();
+    const normalized = grayscale.sub(meanVal).div(tf.scalar(255.0)).add(0.5);
+    
+    // Add batch dimension
+    return normalized.expandDims(0);
   });
-  
-  // Normalize values to [0, 1]
-  const normalized = grayscale.div(255.0);
-  
-  // Add batch dimension
-  const batched = normalized.expandDims(0);
-  
-  // Clean up intermediate tensors
-  tensor.dispose();
-  resized.dispose();
-  grayscale.dispose();
-  
-  return batched;
 };
 
 /**
@@ -72,15 +71,20 @@ export const detectEmotion = async (
     const context = canvas.getContext('2d');
     if (!context) return null;
 
-    // Set canvas size to match video
+    // Set canvas size to match video dimensions
     canvas.width = videoElement.videoWidth;
     canvas.height = videoElement.videoHeight;
+
+    // Calculate face region (center crop of the video)
+    const faceSize = Math.min(canvas.width, canvas.height) * 0.7;
+    const startX = (canvas.width - faceSize) / 2;
+    const startY = (canvas.height - faceSize) / 3; // Move up slightly to better center on the face
 
     // Draw the current video frame onto the canvas
     context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
 
-    // Get the image data from the canvas
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    // Get the image data - focus on the face region for better accuracy
+    const imageData = context.getImageData(startX, startY, faceSize, faceSize);
 
     // Preprocess the image data for the model
     const tensor = preprocessImage(imageData);
@@ -93,7 +97,7 @@ export const detectEmotion = async (
     
     // Convert to array of label-score pairs
     const emotionsWithScores = EMOTION_LABELS.map((label, index) => ({
-      emotion: label,
+      emotion: label.toLowerCase(),
       score: emotionScores[index]
     }));
     
@@ -103,7 +107,7 @@ export const detectEmotion = async (
     // Create an object with all emotions and their scores
     const allEmotions: Record<string, number> = {};
     emotionsWithScores.forEach(item => {
-      allEmotions[item.emotion.toLowerCase()] = item.score;
+      allEmotions[item.emotion.toLowerCase()] = parseFloat(item.score.toFixed(4)); // Round to 4 decimal places
     });
     
     // Clean up tensors

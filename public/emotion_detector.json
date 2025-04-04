@@ -20,6 +20,69 @@
               "ragged": false,
               "name": "conv2d_input"
             }
+          },
+          {
+            "class_name": "Conv2D",
+            "config": {
+              "filters": 32,
+              "kernel_size": [3, 3],
+              "activation": "relu",
+              "padding": "same"
+            }
+          },
+          {
+            "class_name": "MaxPooling2D",
+            "config": {
+              "pool_size": [2, 2]
+            }
+          },
+          {
+            "class_name": "Conv2D",
+            "config": {
+              "filters": 64,
+              "kernel_size": [3, 3],
+              "activation": "relu",
+              "padding": "same"
+            }
+          },
+          {
+            "class_name": "MaxPooling2D",
+            "config": {
+              "pool_size": [2, 2]
+            }
+          },
+          {
+            "class_name": "Conv2D",
+            "config": {
+              "filters": 128,
+              "kernel_size": [3, 3],
+              "activation": "relu",
+              "padding": "same"
+            }
+          },
+          {
+            "class_name": "MaxPooling2D",
+            "config": {
+              "pool_size": [2, 2]
+            }
+          },
+          {
+            "class_name": "Flatten",
+            "config": {}
+          },
+          {
+            "class_name": "Dense",
+            "config": {
+              "units": 128,
+              "activation": "relu"
+            }
+          },
+          {
+            "class_name": "Dense",
+            "config": {
+              "units": 7,
+              "activation": "softmax"
+            }
           }
         ]
       }
