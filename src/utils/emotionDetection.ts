@@ -1,24 +1,23 @@
 
-import * as tf from '@tensorflow/tfjs';
+import { pipeline } from "@huggingface/transformers";
 
-// Labels for the emotions our model can detect - mapping to what the UI expects
-const EMOTION_LABELS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral'];
-const UI_EMOTION_KEYS = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprised', 'neutral'];
+// Standard emotion labels that our UI expects
+const EMOTION_LABELS = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprised', 'neutral'];
 
-let model: tf.LayersModel | null = null;
+// Store the pipeline instance
+let emotionClassifier: any = null;
 
 /**
- * Loads the emotion detection model
+ * Loads the emotion detection model from Hugging Face
  */
 export const loadEmotionDetectionModel = async (): Promise<boolean> => {
   try {
-    // Load the model
-    model = await tf.loadLayersModel('/emotion_detector.json');
-    
-    // Warm up the model with a dummy tensor to ensure it's ready
-    const dummyTensor = tf.zeros([1, 48, 48, 1]);
-    model.predict(dummyTensor);
-    dummyTensor.dispose();
+    // Load the Hugging Face model
+    emotionClassifier = await pipeline(
+      "image-classification",
+      "prithivMLmods/Facial-Emotion-Detection-SigLIP2",
+      { device: "cpu" } // Use WebGPU if available, otherwise fall back to CPU
+    );
     
     console.log('Emotion detection model loaded successfully');
     return true;
@@ -29,36 +28,36 @@ export const loadEmotionDetectionModel = async (): Promise<boolean> => {
 };
 
 /**
- * Preprocesses an image for the emotion detection model
- * @param imageData - The image data from canvas or video frame
- * @returns A tensor ready for model prediction
+ * Creates an image blob from video frame
+ * @param videoElement - The video element to capture from
+ * @returns A blob URL that can be used with the model
  */
-const preprocessImage = (imageData: ImageData): tf.Tensor => {
-  return tf.tidy(() => {
-    // Convert ImageData to tensor
-    const tensor = tf.browser.fromPixels(imageData);
-    
-    // Resize to model input size
-    const resized = tf.image.resizeBilinear(tensor, [48, 48]);
-    
-    // Convert to grayscale (for emotion recognition)
-    const grayscale = resized.mean(2).expandDims(2);
-    
-    // Enhance contrast
-    const meanVal = grayscale.mean();
-    const normalized = grayscale.sub(meanVal).div(tf.scalar(255.0)).add(0.5);
-    
-    // Add batch dimension
-    return normalized.expandDims(0);
-  });
+const captureVideoFrame = (videoElement: HTMLVideoElement): string => {
+  // Create a canvas element to capture the current frame
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not get canvas context');
+
+  // Set canvas size to match video dimensions
+  canvas.width = videoElement.videoWidth;
+  canvas.height = videoElement.videoHeight;
+
+  // Calculate face region (center crop of the video)
+  const faceSize = Math.min(canvas.width, canvas.height) * 0.7;
+  const startX = (canvas.width - faceSize) / 2;
+  const startY = (canvas.height - faceSize) / 3; // Move up slightly to better center on the face
+
+  // Draw the current video frame onto the canvas
+  context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+  
+  // Create a blob from the canvas
+  return canvas.toDataURL('image/jpeg');
 };
 
 /**
- * Maps the model's output to the UI's expected emotion format
- * @param emotionScores - The raw scores from the model
- * @returns An object with the standard emotion keys expected by the UI
+ * Maps the model's output to our UI's expected format
  */
-const mapEmotionsToUIFormat = (emotionScores: Float32Array): {
+const mapEmotionsToUIFormat = (predictions: any[]): {
   happy: number;
   neutral: number;
   surprised: number;
@@ -67,8 +66,6 @@ const mapEmotionsToUIFormat = (emotionScores: Float32Array): {
   disgust: number;
   fear: number;
 } => {
-  const emotionMap: Record<string, number> = {};
-  
   // Initialize with zeros
   const result = {
     happy: 0,
@@ -80,16 +77,26 @@ const mapEmotionsToUIFormat = (emotionScores: Float32Array): {
     fear: 0
   };
   
-  // Map the model output to corresponding UI keys
-  EMOTION_LABELS.forEach((label, index) => {
-    const uiKey = UI_EMOTION_KEYS[index];
-    emotionMap[uiKey] = emotionScores[index];
-  });
-  
-  // Assign values to the result object
-  Object.keys(result).forEach(key => {
-    if (emotionMap[key] !== undefined) {
-      result[key as keyof typeof result] = emotionMap[key];
+  // Map the predictions to our standard format
+  predictions.forEach(prediction => {
+    // Convert model's emotion label to lowercase and normalize
+    const emotion = prediction.label.toLowerCase();
+    
+    // Handle different emotion formats
+    if (emotion.includes('happy')) {
+      result.happy = prediction.score;
+    } else if (emotion.includes('neutral')) {
+      result.neutral = prediction.score;
+    } else if (emotion.includes('surprise')) {
+      result.surprised = prediction.score;
+    } else if (emotion.includes('sad')) {
+      result.sad = prediction.score;
+    } else if (emotion.includes('angry') || emotion.includes('anger')) {
+      result.angry = prediction.score;
+    } else if (emotion.includes('disgust')) {
+      result.disgust = prediction.score;
+    } else if (emotion.includes('fear')) {
+      result.fear = prediction.score;
     }
   });
   
@@ -116,61 +123,33 @@ export const detectEmotion = async (
     fear: number;
   };
 } | null> => {
-  if (!model) {
+  if (!emotionClassifier) {
     console.warn('Emotion detection model not loaded');
     return null;
   }
 
   try {
-    // Create a canvas element to capture the current frame
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    if (!context) return null;
-
-    // Set canvas size to match video dimensions
-    canvas.width = videoElement.videoWidth;
-    canvas.height = videoElement.videoHeight;
-
-    // Calculate face region (center crop of the video)
-    const faceSize = Math.min(canvas.width, canvas.height) * 0.7;
-    const startX = (canvas.width - faceSize) / 2;
-    const startY = (canvas.height - faceSize) / 3; // Move up slightly to better center on the face
-
-    // Draw the current video frame onto the canvas
-    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-
-    // Get the image data - focus on the face region for better accuracy
-    const imageData = context.getImageData(startX, startY, faceSize, faceSize);
-
-    // Preprocess the image data for the model
-    const tensor = preprocessImage(imageData);
-
-    // Make prediction
-    const predictions = await model.predict(tensor) as tf.Tensor;
+    // Capture frame from video
+    const imageData = captureVideoFrame(videoElement);
     
-    // Get the results
-    const emotionScores = await predictions.data();
+    // Run inference with the Hugging Face model
+    const predictions = await emotionClassifier(imageData);
     
-    // Map emotions to UI format
-    const formattedEmotions = mapEmotionsToUIFormat(emotionScores as Float32Array);
+    // Map the predictions to our UI format
+    const formattedEmotions = mapEmotionsToUIFormat(predictions);
     
-    // Convert to array of label-score pairs for finding the top emotion
-    const emotionsWithScores = Object.entries(formattedEmotions).map(([emotion, score]) => ({
-      emotion,
-      score
-    }));
+    // Find the emotion with highest confidence
+    let topEmotion = { emotion: 'neutral', score: 0 };
+    Object.entries(formattedEmotions).forEach(([emotion, score]) => {
+      if (score > topEmotion.score) {
+        topEmotion = { emotion, score };
+      }
+    });
     
-    // Sort by score (highest first)
-    emotionsWithScores.sort((a, b) => b.score - a.score);
-    
-    // Clean up tensors
-    tensor.dispose();
-    predictions.dispose();
-    
-    // Return the top emotion with its confidence
+    // Return the results
     return {
-      emotion: emotionsWithScores[0].emotion,
-      confidence: emotionsWithScores[0].score,
+      emotion: topEmotion.emotion,
+      confidence: topEmotion.score,
       allEmotions: formattedEmotions
     };
   } catch (error) {
