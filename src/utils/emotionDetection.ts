@@ -1,4 +1,3 @@
-
 import { pipeline } from "@huggingface/transformers";
 
 // Standard emotion labels that our UI expects
@@ -13,11 +12,10 @@ let emotionClassifier: any = null;
 export const loadEmotionDetectionModel = async (): Promise<boolean> => {
   try {
     // Load a model that's supported in the browser environment
-    // Use a compatible vision transformer model instead of SigLIP
     emotionClassifier = await pipeline(
       "image-classification",
       "Xenova/emotion-recognition-75", // This is a compatible model for browser environment
-      { quantized: true } // Use quantized model for better performance
+      { revision: "main" } // Using supported options
     );
     
     console.log('Emotion detection model loaded successfully');
